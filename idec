@@ -1,0 +1,151 @@
+def prt(symbol='', hints='cost'):
+    if isinstance(symbol, int):
+        symbol_list = list(COLOR_SYMBOLS.values())
+        # in case of negative indices
+        symbol = symbol_list[min(abs(symbol), len(symbol_list) - 1)]
+    elif isinstance(symbol, str):
+        symbol = COLOR_SYMBOLS.get(symbol, G.format(symbol))
+
+    def dec(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            st = time.time()
+            result = fn(*args, **kwargs)
+            cost_time = time.time() - st
+            if cost_time > cfg.get('cc.log_minimum_time', 0.009):
+                zlog.debug('{} {}({}) {} {} {}s'.format(
+                    symbol,
+                    C.format(fn.__code__.co_filename.split('/')[-1].split('.')[0]),
+                    C.format(fn.__code__.co_firstlineno),
+                    Y.format(fn.__name__),
+                    hints,
+                    color_log(cost_time)
+                ))
+            return result
+
+        return wrapper
+
+    return dec
+
+
+def retry(tries, delay=0, back_off=1, raise_msg='', accepted=None):
+    """Retries a function or method until it got True.
+
+    in some situation, we want to use the ``not True`` as right response,
+    so we can put those not True to ``accepted list`` to skip retry
+
+    - ``delay`` sets the initial delay in seconds
+    - ``back_off`` sets the factor by which
+    - ``raise_msg`` if not '', it'll raise an Exception
+    - ``accepted`` which not True: [0, False, '', None ...]
+    """
+
+    if back_off < 1:
+        raise ValueError('back_off must be 1 or greater')
+
+    tries = math.floor(tries)
+    if tries < 0:
+        raise ValueError('tries must be 0 or greater')
+
+    if delay < 0:
+        raise ValueError('delay must be 0 or greater')
+
+    def deco_retry(f):
+        def f_retry(*args, **kwargs):
+            max_tries, max_delay = tries, delay  # make mutable
+
+            while max_tries > 0:
+                rv = f(*args, **kwargs)  # first attempt
+                if isinstance(accepted, list):
+                    if rv in accepted:
+                        return rv
+                if rv:  # Done on success
+                    return rv
+
+                max_tries -= 1  # consume an attempt
+                time.sleep(max_delay)  # wait...
+                max_delay *= back_off  # make future wait longer
+            else:
+                if raise_msg:
+                    raise Exception(raise_msg)
+                return
+
+        return f_retry  # true decorator -> decorated function
+
+    return deco_retry  # @retry(arg[, ...]) -> true decorator
+
+
+def catch(do_catch=True, exceptions=TypeError, hints='', do_raise=None, prt_tb=True, skip_log=False):
+    """Catch the specified exceptions, and ensure code can carry on
+
+    - if tired of the ``try except`` way, can take this for instead
+
+    Args:
+        do_catch (): do a catch or not
+        exceptions (): can be a tuple or just one
+        hints (): the hint to show
+        do_raise (): if do_raise, will raise the hints or just where the exception happened
+        prt_tb (): print the traceback info or not
+        skip_log (): skip log the error/traceback
+
+    """
+
+    def dec(fn):
+        @wraps(fn)
+        def wrapper_(*args, **kwargs):
+            if not do_catch:
+                return fn(*args, **kwargs)
+
+            try:
+                return fn(*args, **kwargs)
+            except exceptions as e:
+                if not skip_log:
+                    zlog.error("{}({})>{}: has err({})".format(
+                        fn.__code__.co_filename.split('/')[-1],
+                        fn.__code__.co_firstlineno,
+                        fn.__name__, e))
+                    if prt_tb:
+                        traceback.print_exc()
+                if do_raise:
+                    raise do_raise(
+                        hints or "{}({}):{}".format(
+                            fn.__code__.co_filename.split('/')[-1],
+                            fn.__code__.co_firstlineno,
+                            fn.__name__)
+                    )
+
+        return wrapper_
+
+    return dec
+
+
+class Deprecated(object):
+    """This is a decorator which can be used to mark functions
+    as deprecated. It will result in a warning being emitted
+    when the function is used.
+
+    - It accepts a single parameter ``msg`` which is shown with the warning.
+    - It should contain information which function or method to use instead.
+
+    """
+
+    def __init__(self, msg):
+        self.msg = msg
+
+    def __call__(self, fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if cfg.get('cc.show_deprecated', False):
+                import warnings
+                warnings.simplefilter('always', DeprecationWarning)
+                warnings.warn(Y.format(
+                    "Call to deprecated method ({}({}):{}).{}".format
+                    (fn.__code__.co_filename.split('/')[-1],
+                     fn.__code__.co_firstlineno,
+                     fn.__name__, self.msg),
+                    category=DeprecationWarning,
+                    stacklevel=2))
+                warnings.simplefilter('default', DeprecationWarning)  # reset filter
+            return fn(*args, **kwargs)
+
+        return wrapper
