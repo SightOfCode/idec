@@ -1,33 +1,3 @@
-def prt(symbol='', hints='cost'):
-    if isinstance(symbol, int):
-        symbol_list = list(COLOR_SYMBOLS.values())
-        # in case of negative indices
-        symbol = symbol_list[min(abs(symbol), len(symbol_list) - 1)]
-    elif isinstance(symbol, str):
-        symbol = COLOR_SYMBOLS.get(symbol, G.format(symbol))
-
-    def dec(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            st = time.time()
-            result = fn(*args, **kwargs)
-            cost_time = time.time() - st
-            if cost_time > cfg.get('cc.log_minimum_time', 0.009):
-                zlog.debug('{} {}({}) {} {} {}s'.format(
-                    symbol,
-                    C.format(fn.__code__.co_filename.split('/')[-1].split('.')[0]),
-                    C.format(fn.__code__.co_firstlineno),
-                    Y.format(fn.__name__),
-                    hints,
-                    color_log(cost_time)
-                ))
-            return result
-
-        return wrapper
-
-    return dec
-
-
 def retry(tries, delay=0, back_off=1, raise_msg='', accepted=None):
     """Retries a function or method until it got True.
 
